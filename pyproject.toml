@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "endnote-cli"
+version = "0.1.0"
+description = "CLI & MCP server for reading/searching/exporting EndNote libraries (.enl SQLite)"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+mcp = ["fastmcp>=2.0"]
+semantic = ["sentence-transformers>=3.0"]
+all = ["endnote-cli[mcp,semantic]"]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.scripts]
+endnote-cli = "endnote_cli.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/endnote_cli"]
+
+[tool.ruff]
+line-length = 100

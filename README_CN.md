@@ -116,6 +116,30 @@ endnote-cli export xml --group-set "医案类研究"
 
 配置后，Claude 可直接通过 MCP 调用 endnote-cli 的全部功能：搜索论文、获取元数据、导出 BibTeX、打标签等。
 
+## 作为 Claude Code Skill 安装
+
+除 MCP 服务器之外，本仓库在 `.claude/skills/endnote-cli/SKILL.md` 中还提供了一份 [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills)。注册后，当你在 Claude Code 中提到 EndNote、`.enl`、导出 BibTeX 等关键词时会自动加载。
+
+**注册 skill**（推荐软链接，随仓库更新自动同步）：
+
+```bash
+# Linux / macOS
+ln -s "$(pwd)/.claude/skills/endnote-cli" ~/.claude/skills/endnote-cli
+
+# Windows（以管理员身份打开 PowerShell）
+New-Item -ItemType SymbolicLink `
+  -Path  "$HOME\.claude\skills\endnote-cli" `
+  -Target "$(Get-Location)\.claude\skills\endnote-cli"
+```
+
+不想用软链接也可以直接复制目录：
+
+```bash
+cp -r .claude/skills/endnote-cli ~/.claude/skills/
+```
+
+在 Claude Code 里执行 `/help` 验证 —— skills 列表中应出现 `endnote-cli`。
+
 ## 技术架构
 
 ### 双数据库发现

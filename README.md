@@ -113,6 +113,30 @@ Add to your `.mcp.json` (Claude Code) or `claude_desktop_config.json`:
 }
 ```
 
+## Install as a Claude Code Skill
+
+In addition to the MCP server, this repo ships a [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills) at `.claude/skills/endnote-cli/SKILL.md`. Once registered, Claude Code automatically loads it when you mention EndNote, `.enl`, BibTeX export, etc.
+
+**Register the skill** (symlink keeps it in sync with repo updates):
+
+```bash
+# Linux / macOS
+ln -s "$(pwd)/.claude/skills/endnote-cli" ~/.claude/skills/endnote-cli
+
+# Windows (PowerShell, run as Administrator)
+New-Item -ItemType SymbolicLink `
+  -Path  "$HOME\.claude\skills\endnote-cli" `
+  -Target "$(Get-Location)\.claude\skills\endnote-cli"
+```
+
+If you'd rather not symlink, just copy the folder:
+
+```bash
+cp -r .claude/skills/endnote-cli ~/.claude/skills/
+```
+
+Verify by running `/help` in Claude Code — `endnote-cli` should appear in the skills list.
+
 ## Architecture
 
 ### The Dual-Database Discovery

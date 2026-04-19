@@ -116,6 +116,7 @@ class Reference:
             3: "Conference Proceedings",
             4: "Conference Paper",
             29: "Electronic Article",
+            31: "Thesis",
             36: "Online Database",
             47: "Preprint",
         }

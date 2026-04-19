@@ -12,8 +12,9 @@ from __future__ import annotations
 import os
 import shutil
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 from .models import SAFE_WRITE_FIELDS
 from .reader import EndnoteLibrary
@@ -55,6 +56,13 @@ class EndnoteWriter:
     def pdf_dir(self) -> Path:
         return self.path.with_suffix(".Data") / "PDF"
 
+    # Name of the AFTER UPDATE trigger on refs that calls EN_MAKE_SORT_KEY
+    # and indirectly uses EndNote's custom collations (e.g. ENCIN_zh_CN).
+    # We bypass it during UPDATEs to refs because the function + collations
+    # aren't available in Python's sqlite3. Safe because we never touch
+    # title / author / year — the columns whose sort keys it recomputes.
+    _SORT_TRIGGER = "refs__refs_ord_AU"
+
     def _exec_both(self, sql: str, params: tuple = ()) -> None:
         """Execute SQL on both .enl and sdb.eni."""
         self.conn.execute(sql, params)
@@ -66,6 +74,41 @@ class EndnoteWriter:
         self.conn.commit()
         if self.sdb_conn:
             self.sdb_conn.commit()
+
+    @contextmanager
+    def _refs_update_tx(self) -> Iterator[None]:
+        """Context manager for UPDATE statements targeting the `refs` table.
+
+        Drops the `refs__refs_ord_AU` trigger inside an explicit transaction,
+        yields for the caller's UPDATE(s), recreates the trigger from its
+        stored SQL, then commits. On any exception rolls back both databases
+        — the trigger drop is part of the tx so it reverts atomically.
+        """
+        conns = [c for c in (self.conn, self.sdb_conn) if c is not None]
+        backups: list[tuple[sqlite3.Connection, str]] = []
+        try:
+            for con in conns:
+                con.execute("BEGIN")
+                row = con.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+                    (self._SORT_TRIGGER,),
+                ).fetchone()
+                if row and row[0]:
+                    con.execute(f"DROP TRIGGER {self._SORT_TRIGGER}")
+                    backups.append((con, row[0]))
+            yield
+            # Recreate triggers BEFORE commit so any failure rolls everything back.
+            for con, trig_sql in backups:
+                con.execute(trig_sql)
+            for con in conns:
+                con.commit()
+        except Exception:
+            for con in conns:
+                try:
+                    con.rollback()
+                except sqlite3.Error:
+                    pass
+            raise
 
     def close(self):
         if self._conn:
@@ -96,10 +139,10 @@ class EndnoteWriter:
             )
         if not self._ref_exists(ref_id):
             raise ValueError(f"Reference {ref_id} not found")
-        self._exec_both(
-            f"UPDATE refs SET {field} = ? WHERE id = ?", (value, ref_id)
-        )
-        self._commit_both()
+        with self._refs_update_tx():
+            self._exec_both(
+                f"UPDATE refs SET {field} = ? WHERE id = ?", (value, ref_id)
+            )
 
     def clear_field(self, ref_id: int, field: str) -> None:
         """Clear (empty) a safe field."""
@@ -118,10 +161,10 @@ class EndnoteWriter:
             f"SELECT {field} FROM refs WHERE id = ?", (ref_id,)
         ).fetchone()[0] or ""
         new_value = f"{current}{separator}{value}" if current.strip() else value
-        self._exec_both(
-            f"UPDATE refs SET {field} = ? WHERE id = ?", (new_value, ref_id)
-        )
-        self._commit_both()
+        with self._refs_update_tx():
+            self._exec_both(
+                f"UPDATE refs SET {field} = ? WHERE id = ?", (new_value, ref_id)
+            )
 
     def write_research_notes(self, ref_id: int, text: str) -> None:
         """Write to research_notes field."""
@@ -163,10 +206,10 @@ class EndnoteWriter:
         existing = {k.lower() for k in self._split_multivalue(current)}
         if keyword.strip().lower() not in existing:
             new_val = f"{current}\r{keyword}" if current.strip() else keyword
-            self._exec_both(
-                "UPDATE refs SET keywords = ? WHERE id = ?", (new_val, ref_id)
-            )
-            self._commit_both()
+            with self._refs_update_tx():
+                self._exec_both(
+                    "UPDATE refs SET keywords = ? WHERE id = ?", (new_val, ref_id)
+                )
 
     def remove_keyword(self, ref_id: int, keyword: str) -> None:
         """Remove a keyword."""
@@ -178,10 +221,10 @@ class EndnoteWriter:
         keywords = [k for k in self._split_multivalue(current)
                      if k.lower() != keyword.strip().lower()]
         new_val = "\r".join(keywords)
-        self._exec_both(
-            "UPDATE refs SET keywords = ? WHERE id = ?", (new_val, ref_id)
-        )
-        self._commit_both()
+        with self._refs_update_tx():
+            self._exec_both(
+                "UPDATE refs SET keywords = ? WHERE id = ?", (new_val, ref_id)
+            )
 
     # ── Tags (color labels) ────────────────────────────────────
 

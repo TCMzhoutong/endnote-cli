@@ -1,6 +1,6 @@
 ---
 name: endnote-cli
-description: Interact with EndNote `.enl` libraries using the endnote-cli tool to read, search, export, and safely update references, groups, color tags, and attachments via direct SQLite access. Use when the user asks to work with EndNote libraries, `.enl` files, export BibTeX/RIS/CSV/XML/JSON from EndNote, search or list references, rename PDFs, manage groups or color tags, write notes/keywords/ratings back to EndNote, or start the EndNote MCP server. Trigger signals include: "EndNote", ".enl", "导出 BibTeX 从 EndNote", "文献库", "参考文献管理", "Clarivate", "sdb.eni".
+description: Interact with EndNote `.enl` libraries using the endnote-cli tool to read, search, export, and safely update references, groups, color tags, and attachments via direct SQLite access. Also handles batch-filling the `translated_title` field with user-specified translations. Use when the user asks to work with EndNote libraries, `.enl` files, export BibTeX/RIS/CSV/XML/JSON, search or list references, rename PDFs, manage groups or color tags, write notes/keywords/ratings back, translate paper titles, fill `translated_title` / `Translated Title`, or start the EndNote MCP server. Trigger signals include: "EndNote", ".enl", "文献库", "参考文献管理", "Clarivate", "sdb.eni", "翻译标题", "Translated Title", "translated_title".
 ---
 
 # EndNote CLI
@@ -64,9 +64,23 @@ endnote-cli write rename-pdf --all
 - **Always dry-run destructive writes first** (`--dry-run` on `rename-pdf`, bulk `write` ops).
 - **Close EndNote before any `write` subcommand** — the app locks `.enl` and `sdb.eni`; writes while open corrupt state or silently fail.
 - **Never `INSERT` into `refs`** — the table uses triggers calling `EN_MAKE_SORT_KEY`, a custom SQLite function only present inside the EndNote runtime. Only `UPDATE` of safe fields is supported; the CLI enforces this.
-- **Safe write fields**: `research_notes`, `notes`, `keywords`, `read_status`, `rating`, `label`, `caption`, `custom_1`..`custom_7`. Other fields are not exposed by `write`.
+- **Safe write fields**: `research_notes`, `notes`, `keywords`, `read_status`, `rating`, `label`, `caption`, `custom_1`..`custom_7`, `translated_title`, `translated_author`. Other fields are not exposed by `write`.
 - **Dual-database sync**: writes update both `MyLibrary.enl` and `MyLibrary.Data/sdb/sdb.eni`. The CLI handles this — do not hand-edit one side.
 - **Tag colors**: only 7 presets render correctly (red, orange, yellow, green, blue, purple, gray). Custom hex renders as gray in the UI.
+
+## Translate titles → `translated_title`
+
+For refs whose `title` is in one language and `translated_title` is empty,
+translate the title and write it via `EndnoteWriter.write_field(id,
+"translated_title", value)`.
+
+- Ask the user for target language and domain up front if not obvious.
+- Detect "foreign" titles by character-set heuristic on `title`; the
+  `language` column is unreliable (often blank).
+- Dry-run a preview list before writing. At write time, re-check the row's
+  `translated_title` is still empty.
+- After the real run, confirm both `.enl` and `sdb.eni` counts match and
+  have the user spot-check in EndNote.
 
 ## Multi-library
 

@@ -161,12 +161,18 @@ REFS_SELECT_FIELDS = [
     "added_to_library", "record_last_updated",
 ]
 
-# Fields that are safe to UPDATE without triggering EN_MAKE_SORT_KEY
+# Fields that are safe to UPDATE.
+#
+# The `refs__refs_ord_AU` trigger calls EN_MAKE_SORT_KEY on
+# title / author / year, so updates to those three must be avoided.
+# Every other TEXT column on `refs` that isn't derived / indexed is
+# safe — the writer bypasses the sort-key trigger inside a tx anyway.
 SAFE_WRITE_FIELDS = {
     "research_notes", "notes", "keywords", "read_status", "rating",
     "label", "caption",
     "custom_1", "custom_2", "custom_3", "custom_4",
     "custom_5", "custom_6", "custom_7",
+    "translated_title", "translated_author",
 }
 
 # Human-readable aliases for search

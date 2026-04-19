@@ -170,26 +170,37 @@ class EndnoteLibrary:
         return tags
 
     def _get_tag_ids(self, ref_id: int) -> list[int]:
-        """Get tag IDs assigned to a reference."""
+        """Get tag IDs assigned to a reference.
+
+        `tag_members.tag_ids` stores ids as space-separated lowercase hex
+        (EndNote convention): "1".."9", "a"..."f", "10" (=16), etc.
+        """
         row = self.conn.execute(
             "SELECT tag_ids FROM tag_members WHERE rowid = ?", (ref_id,)
         ).fetchone()
         if not row or not row["tag_ids"] or row["tag_ids"].strip() == "":
             return []
-        return [int(x) for x in row["tag_ids"].split() if x.strip().isdigit()]
+        out = []
+        for tok in row["tag_ids"].split():
+            try:
+                out.append(int(tok, 16))
+            except ValueError:
+                pass
+        return out
 
     def get_refs_by_tag(self, tag_id: int) -> list[int]:
-        """Get reference IDs that have a specific tag."""
-        # tag_members is FTS5 with detail=none, so MATCH won't work.
-        # Fall back to scanning all rows and checking tag_ids string.
+        """Get reference IDs that have a specific tag.
+
+        Tokens in `tag_ids` are lowercase hex per EndNote convention.
+        """
         rows = self.conn.execute(
             "SELECT rowid, tag_ids FROM tag_members"
         ).fetchall()
-        tag_str = str(tag_id)
+        tag_hex = format(tag_id, "x")
         result = []
         for r in rows:
             ids = r["tag_ids"].split() if r["tag_ids"] else []
-            if tag_str in ids:
+            if tag_hex in ids:
                 result.append(r["rowid"])
         return result
 

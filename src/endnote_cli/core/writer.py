@@ -293,18 +293,24 @@ class EndnoteWriter:
         )
 
     def write_tag(self, ref_id: int, tag_id: int) -> None:
-        """Add a color tag to a reference."""
+        """Add a color tag to a reference.
+
+        EndNote stores tag ids in `tag_members.tag_ids` as space-separated
+        LOWERCASE HEX tokens (1..9 → "1".."9", 10 → "a", 15 → "f"), not
+        decimal. Decimal tokens for ids >= 10 are silently ignored by
+        EndNote's tag-count UI.
+        """
         if not self._ref_exists(ref_id):
             raise ValueError(f"Reference {ref_id} not found")
         row = self.conn.execute(
             "SELECT tag_ids FROM tag_members WHERE rowid = ?", (ref_id,)
         ).fetchone()
         if row:
-            current_ids = set(row[0].split()) if row[0] else set()
-            current_ids.add(str(tag_id))
-            new_val = " " + " ".join(sorted(current_ids)) + " "
+            current = {int(x, 16) for x in (row[0] or "").split() if x.strip()}
+            current.add(tag_id)
+            new_val = " " + " ".join(format(i, "x") for i in sorted(current)) + " "
         else:
-            new_val = f" {tag_id} "
+            new_val = f" {format(tag_id, 'x')} "
         # FTS5 tables need DELETE + INSERT; do on both dbs
         self._update_tag_members(self.conn, ref_id, new_val)
         if self.sdb_conn:
@@ -318,9 +324,9 @@ class EndnoteWriter:
         ).fetchone()
         if not row:
             return
-        current_ids = set(row[0].split()) if row[0] else set()
-        current_ids.discard(str(tag_id))
-        new_val = " " + " ".join(sorted(current_ids)) + " " if current_ids else " "
+        current = {int(x, 16) for x in (row[0] or "").split() if x.strip()}
+        current.discard(tag_id)
+        new_val = " " + " ".join(format(i, "x") for i in sorted(current)) + " " if current else " "
         self._update_tag_members(self.conn, ref_id, new_val)
         if self.sdb_conn:
             self._update_tag_members(self.sdb_conn, ref_id, new_val)

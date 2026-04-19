@@ -157,6 +157,147 @@ def clear(
     typer.echo(f"Cleared {field_name} for ref {ref_id}.")
 
 
+@write_cmd.command("journal-tags")
+def journal_tags(
+    library: Optional[str] = typer.Option(None, "--library", "-l", help="Library name or path"),
+    group: Optional[str] = typer.Option(None, "--group", "-g", help="Only process refs in this group"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without writing"),
+    refresh: bool = typer.Option(
+        False, "--refresh",
+        help="Remove existing `N区YY年` / `预印本` tags on each ref before re-applying",
+    ),
+    refresh_data: bool = typer.Option(
+        False, "--refresh-data",
+        help="Re-download the ranking CSVs (otherwise cached copy is used)",
+    ),
+):
+    """Auto-tag refs with their journal's CAS zone.
+
+    Tag names:
+      - `新锐N区` from the New-Elite 2026 table (XR2026)
+      - `N区25年` from the CAS 2025 table (FQBJCR2025)
+      - `预印本` if the journal contains 'arxiv'
+
+    Colors: 1=red, 2=orange, 3=green, 4=gray, preprint=gray.
+
+    Data fetched from github.com/hitfyd/ShowJCR on first use, cached under
+    ~/.endnote-cli/jcr_cache/.
+    """
+    from endnote_cli.core import jcr
+
+    lib_path = resolve_library_path(library)
+
+    typer.echo("Loading ranking data…")
+    xr = jcr.load("XR2026", force_refresh=refresh_data)
+    fq = jcr.load("FQBJCR2025", force_refresh=refresh_data)
+    typer.echo(f"  XR2026:     {len(xr.by_name):>6} journals / {len(xr.by_issn):>6} ISSNs")
+    typer.echo(f"  FQBJCR2025: {len(fq.by_name):>6} journals / {len(fq.by_issn):>6} ISSNs")
+
+    zone_color = {1: "red", 2: "orange", 3: "green", 4: "gray"}
+    zone_tag_re = re.compile(r"^(?:新锐[1-4]区|[1-4]区\d+年)$")
+
+    # Collect refs in scope
+    with EndnoteLibrary(lib_path) as lib:
+        if group:
+            g = lib.get_group_by_name(group)
+            if not g:
+                typer.echo(f"Group '{group}' not found.", err=True)
+                raise typer.Exit(1)
+            refs = [r for r in (lib.get_ref(i) for i in g.member_ids)
+                    if r and r.trash_state == 0]
+        else:
+            refs = lib.list_refs()
+        existing_tags = {t.name: t.group_id for t in lib.list_tags()}
+        # current tag ids per ref (for --refresh diffing)
+        cur_tags = {r.id: set(r.tag_ids) for r in refs}
+
+    # Build plan
+    plan: list[tuple[int, list[str], str]] = []  # (ref_id, tag_names, journal_preview)
+    unmatched: list[tuple[int, str]] = []
+
+    for r in refs:
+        journal = r.secondary_title or ""
+        issn = r.isbn or ""
+        tags: list[str] = []
+        if "arxiv" in journal.lower():
+            tags.append("预印本")
+        else:
+            h1 = xr.lookup(journal, issn)
+            if h1:
+                tags.append(f"新锐{h1.zone}区")
+            h2 = fq.lookup(journal, issn)
+            if h2:
+                tags.append(f"{h2.zone}区25年")
+        if tags:
+            plan.append((r.id, tags, journal[:60]))
+        elif journal.strip():
+            unmatched.append((r.id, journal[:80]))
+
+    # Report
+    typer.echo(f"\nScope: {len(refs)} refs  |  tagged: {len(plan)}  |  unmatched: {len(unmatched)}")
+    breakdown: dict[tuple[str, ...], int] = {}
+    for _, tags, _ in plan:
+        breakdown[tuple(sorted(tags))] = breakdown.get(tuple(sorted(tags)), 0) + 1
+    typer.echo("\nBy tag combination:")
+    for tset, n in sorted(breakdown.items(), key=lambda kv: (-kv[1], kv[0])):
+        typer.echo(f"  {', '.join(tset):<30} × {n}")
+
+    if dry_run:
+        typer.echo("\nSample (first 10 tagged):")
+        for rid, tags, j in plan[:10]:
+            typer.echo(f"  #{rid:>5}  [{','.join(tags):<18}]  {j}")
+        if unmatched:
+            typer.echo("\nSample unmatched (first 15):")
+            for rid, j in unmatched[:15]:
+                typer.echo(f"  #{rid:>5}  {j}")
+        typer.echo("\n(dry-run — nothing written)")
+        return
+
+    # Apply
+    needed_tag_names: set[str] = set()
+    for _, tags, _ in plan:
+        needed_tag_names.update(tags)
+
+    added_links = 0
+    removed_links = 0
+    created_tags = 0
+
+    with EndnoteWriter(lib_path) as w:
+        # Ensure all needed tags exist
+        for name in sorted(needed_tag_names):
+            if name in existing_tags:
+                continue
+            if name == "预印本":
+                color = "gray"
+            else:
+                m = re.search(r"[1-4]", name)
+                color = zone_color[int(m.group(0))] if m else "gray"
+            tid = w.create_tag(name, color)
+            existing_tags[name] = tid
+            created_tags += 1
+            typer.echo(f"Created tag '{name}' (id={tid}, color={color})")
+
+        all_zone_tag_ids = {tid for n, tid in existing_tags.items()
+                            if n == "预印本" or zone_tag_re.match(n)}
+
+        for rid, tags, _ in plan:
+            want_ids = {existing_tags[n] for n in tags}
+            have_ids = cur_tags.get(rid, set())
+            if refresh:
+                for tid in (have_ids & all_zone_tag_ids) - want_ids:
+                    w.remove_tag(rid, tid)
+                    removed_links += 1
+            for tid in want_ids - have_ids:
+                w.write_tag(rid, tid)
+                added_links += 1
+
+    typer.echo(
+        f"\nDone. Created {created_tags} tag(s); added {added_links} tag-link(s)"
+        + (f"; removed {removed_links} stale tag-link(s)" if refresh else "")
+        + "."
+    )
+
+
 @write_cmd.command("rename-pdf")
 def rename_pdf(
     ref_id: int = typer.Argument(None, help="Reference ID (for single rename)"),

@@ -8,9 +8,10 @@ CLI and MCP server for reading, searching, writing, and exporting EndNote `.enl`
 
 - **Read** -- list, get, and count references with rich table output
 - **Search** -- quick full-text and advanced multi-field boolean search
-- **Write** -- safely update notes, keywords, tags, ratings, labels, custom fields, and attachments
+- **Write** -- safely update notes, keywords, tags, ratings, labels, custom fields, translated title/author, and attachments
 - **Export** -- BibTeX, RIS, JSON, CSV, XML, PDF copy-out, and formatted citations
 - **Groups & Tags** -- browse group hierarchies and color-tag assignments
+- **Journal zone auto-tagging** -- one command assigns CAS + New-Elite zone color tags using data from [hitfyd/ShowJCR](https://github.com/hitfyd/ShowJCR)
 - **MCP Server** -- expose all capabilities to Claude Code / Claude Desktop via Model Context Protocol
 - **Multi-library** -- manage and switch between multiple `.enl` files
 
@@ -61,7 +62,7 @@ endnote-cli app info
 | `tag` | `list`, `show` | Browse color tags and tagged references |
 | `search` | `quick`, `advanced` | Full-text and multi-field boolean search |
 | `export` | `bibtex`, `ris`, `json`, `csv`, `xml`, `pdf`, `citation` | Export in various formats |
-| `write` | `note`, `keyword`, `status`, `rating`, `label`, `tag`, `field`, `attach`, `clear`, `rename-pdf` | Write to safe fields and manage attachments |
+| `write` | `note`, `keyword`, `status`, `rating`, `label`, `tag`, `journal-tags`, `field`, `attach`, `clear`, `rename-pdf` | Write to safe fields, manage attachments, auto-tag by journal zone |
 | `library` | `list`, `info`, `set-default`, `set-dir` | Manage multiple libraries |
 | `mcp` | *(none)* | Start MCP server |
 
@@ -91,12 +92,51 @@ endnote-cli write rename-pdf --all
 # Add a color tag to all arXiv papers
 endnote-cli write tag 296 6
 
+# Auto-tag every ref with its CAS zone (新锐N区 / N区25年 / 预印本)
+endnote-cli write journal-tags --dry-run   # preview the plan
+endnote-cli write journal-tags             # apply
+
+# Fill the Translated Title field
+endnote-cli write field 179 translated_title "肠道菌群与肺部疾病的文献计量分析"
+
 # Write review notes back to EndNote
 endnote-cli write note 296 my_review.md
 
 # Export a group set as hierarchical XML files
 endnote-cli export xml --group-set "Medical Cases"
 ```
+
+## Journal Zone Auto-Tagging
+
+`endnote-cli write journal-tags` tags every reference with color-coded
+zone labels based on its journal. Tags applied per ref:
+
+| Tag | Source | Color |
+|---|---|---|
+| `新锐N区` | 新锐期刊分区表 2026 (XR2026) | red/orange/green/gray for N=1/2/3/4 |
+| `N区25年` | 中科院分区表升级版 2025 (FQBJCR2025) | same color scheme |
+| `预印本` | journal name contains `arxiv` | gray |
+
+Matching order: ISSN first (EndNote's `isbn` field), then normalized journal
+name. Chinese-only journals and conference proceedings are skipped — they're
+outside the CAS scope.
+
+```bash
+# Preview — no writes
+endnote-cli write journal-tags --dry-run
+
+# Apply
+endnote-cli write journal-tags
+
+# Scope to a group
+endnote-cli write journal-tags --group "RAG"
+
+# Re-download the source data and re-tag everything
+endnote-cli write journal-tags --refresh-data --refresh
+```
+
+Ranking data is fetched from [hitfyd/ShowJCR](https://github.com/hitfyd/ShowJCR)
+on first use and cached under `~/.endnote-cli/jcr_cache/`.
 
 ## MCP Server Setup
 
@@ -159,7 +199,7 @@ At runtime, EndNote reads from `sdb.eni`. **All write operations must update bot
 
 The following fields can be safely updated without triggering internal triggers:
 
-`research_notes`, `notes`, `keywords`, `read_status`, `rating`, `label`, `caption`, `custom_1` through `custom_7`
+`research_notes`, `notes`, `keywords`, `read_status`, `rating`, `label`, `caption`, `custom_1` through `custom_7`, `translated_title`, `translated_author`
 
 ## Limitations
 

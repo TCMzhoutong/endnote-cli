@@ -13,7 +13,7 @@ from .library_cmd import library_cmd
 
 app = typer.Typer(
     name="endnote-cli",
-    help="CLI & MCP server for reading/searching/exporting EndNote libraries.",
+    help="CLI for reading/searching/exporting EndNote libraries.",
     no_args_is_help=True,
 )
 
@@ -25,14 +25,3 @@ app.add_typer(search_cmd, name="search", help="Search references")
 app.add_typer(export_cmd, name="export", help="Export references (BibTeX, RIS, JSON, CSV, XML, PDF)")
 app.add_typer(write_cmd, name="write", help="Write to safe fields (notes, tags, attachments)")
 app.add_typer(library_cmd, name="library", help="Manage multiple libraries")
-
-
-@app.command()
-def mcp():
-    """Start MCP server for Claude Code / Claude Desktop."""
-    try:
-        from endnote_cli.mcp.server import serve
-        serve()
-    except ImportError:
-        typer.echo("MCP dependencies not installed. Run: pip install 'endnote-cli[mcp]'")
-        raise typer.Exit(1)

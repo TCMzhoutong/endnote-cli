@@ -114,3 +114,57 @@ def count(
     with lib:
         n = lib.count_refs(include_trashed=trashed)
     typer.echo(n)
+
+
+@item_cmd.command()
+def groups(
+    ref_id: int = typer.Argument(..., help="Reference ID"),
+    library: Optional[str] = typer.Option(None, "--library", "-l", help="Library name or path"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """List all groups (with parent GroupSet) that contain a given reference.
+
+    Path format: 'GroupSet/Group' for parented groups, bare 'Group' name for
+    orphan (unparented) groups. Use --json for machine-readable output.
+    """
+    import json as jsonmod
+    from rich.console import Console
+    from rich.table import Table
+
+    lib = _get_lib(library)
+    with lib:
+        gs = lib.list_groups_for_ref(ref_id)
+        sets = {s.set_id: s.name for s in lib.list_group_sets()}
+
+    def path_for(g):
+        if g.group_set_id and g.group_set_id in sets:
+            return f"{sets[g.group_set_id]}/{g.name}"
+        return g.name
+
+    if json_output:
+        out = [
+            {
+                "group_id": g.group_id,
+                "group_name": g.name,
+                "group_set_id": g.group_set_id,
+                "group_set_name": sets.get(g.group_set_id) if g.group_set_id else None,
+                "path": path_for(g),
+            }
+            for g in gs
+        ]
+        typer.echo(jsonmod.dumps(out, ensure_ascii=False, indent=2))
+        return
+
+    if not gs:
+        typer.echo(f"Reference {ref_id} is not in any group.")
+        return
+
+    console = Console()
+    table = Table(show_header=True, title=f"Groups for ref #{ref_id} ({len(gs)})")
+    table.add_column("Group ID", justify="right", style="cyan")
+    table.add_column("Path")
+
+    for g in gs:
+        table.add_row(str(g.group_id), path_for(g))
+
+    console.print(table)

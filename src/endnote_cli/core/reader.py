@@ -252,6 +252,10 @@ class EndnoteLibrary:
                 return g
         return None
 
+    def list_groups_for_ref(self, ref_id: int) -> list[Group]:
+        """List all groups that contain the given reference."""
+        return [g for g in self.list_groups() if ref_id in g.member_ids]
+
     # ── Group Sets ──────────────────────────────────────────────
 
     def list_group_sets(self) -> list[GroupSet]:
@@ -273,23 +277,32 @@ class EndnoteLibrary:
         return sets
 
     def _get_group_set_mapping(self) -> dict[int, int]:
-        """Get mapping of group_id → set_id from misc code=4."""
-        row = self.conn.execute(
-            "SELECT value FROM misc WHERE code = 4 AND subcode = 0"
-        ).fetchone()
-        if not row:
-            return {}
-        raw = row["value"]
-        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
-        parts = text.strip().split()
-        mapping = {}
-        for i in range(0, len(parts) - 1, 2):
-            try:
-                gid = int(parts[i])
-                sid = int(parts[i + 1])
-                mapping[gid] = sid
-            except ValueError:
-                continue
+        """Get mapping of group_id → set_id by parsing each GroupSet's
+        XML (misc code=17, one row per set) for <member> UUIDs and
+        looking up the corresponding group_id from the groups table.
+
+        Note: misc code=4 holds only a stale subset (legacy?), so it is
+        unreliable as a hierarchy source.
+        """
+        # Build UUID → group_id index from groups table.
+        uuid_to_gid: dict[str, int] = {}
+        for r in self.conn.execute("SELECT group_id, spec FROM groups"):
+            spec = r["spec"]
+            xml = spec.decode("utf-8") if isinstance(spec, bytes) else spec
+            uuid_m = re.search(r"<id>([^<]+)</id>", xml)
+            if uuid_m:
+                uuid_to_gid[uuid_m.group(1)] = r["group_id"]
+
+        # Walk each GroupSet's XML and collect <member> UUIDs.
+        mapping: dict[int, int] = {}
+        for r in self.conn.execute("SELECT subcode, value FROM misc WHERE code = 17"):
+            sid = r["subcode"]
+            val = r["value"]
+            xml = val.decode("utf-8") if isinstance(val, bytes) else val
+            for member_uuid in re.findall(r"<member>([^<]+)</member>", xml):
+                gid = uuid_to_gid.get(member_uuid)
+                if gid is not None:
+                    mapping[gid] = sid
         return mapping
 
     def get_group_tree(self) -> list[GroupSet]:

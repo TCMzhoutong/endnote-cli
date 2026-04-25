@@ -2,7 +2,7 @@
 
 **English** | [中文](README_CN.md)
 
-CLI and MCP server for reading, searching, writing, and exporting EndNote `.enl` libraries via direct SQLite access.
+CLI for reading, searching, writing, and exporting EndNote `.enl` libraries via direct SQLite access.
 
 ## Key Features
 
@@ -12,7 +12,6 @@ CLI and MCP server for reading, searching, writing, and exporting EndNote `.enl`
 - **Export** -- BibTeX, RIS, JSON, CSV, XML, PDF copy-out, and formatted citations
 - **Groups & Tags** -- browse group hierarchies and color-tag assignments
 - **Journal zone auto-tagging** -- one command assigns CAS + New-Elite zone color tags using data from [hitfyd/ShowJCR](https://github.com/hitfyd/ShowJCR)
-- **MCP Server** -- expose all capabilities to Claude Code / Claude Desktop via Model Context Protocol
 - **Multi-library** -- manage and switch between multiple `.enl` files
 
 ## Requirements
@@ -27,9 +26,6 @@ CLI and MCP server for reading, searching, writing, and exporting EndNote `.enl`
 ```bash
 # Core CLI
 pip install endnote-cli
-
-# With MCP server support
-pip install 'endnote-cli[mcp]'
 
 # With semantic search (sentence-transformers)
 pip install 'endnote-cli[semantic]'
@@ -57,14 +53,13 @@ endnote-cli app info
 | Command | Subcommands | Description |
 |---|---|---|
 | `app` | `ping`, `info` | Check connectivity and library summary |
-| `item` | `list`, `get`, `count` | List, inspect, and count references |
+| `item` | `list`, `get`, `count`, `groups` | List, inspect, count references; show a ref's group membership |
 | `group` | `list`, `tree`, `show` | Browse groups and group-set hierarchy |
 | `tag` | `list`, `show` | Browse color tags and tagged references |
 | `search` | `quick`, `advanced` | Full-text and multi-field boolean search |
 | `export` | `bibtex`, `ris`, `json`, `csv`, `xml`, `pdf`, `citation` | Export in various formats |
 | `write` | `note`, `keyword`, `status`, `rating`, `label`, `tag`, `journal-tags`, `field`, `attach`, `clear`, `rename-pdf` | Write to safe fields, manage attachments, auto-tag by journal zone |
 | `library` | `list`, `info`, `set-default`, `set-dir` | Manage multiple libraries |
-| `mcp` | *(none)* | Start MCP server |
 
 Run `endnote-cli <command> --help` for detailed usage of any command.
 
@@ -81,6 +76,10 @@ endnote-cli search advanced \
 
 # Show group hierarchy (GroupSet -> Groups)
 endnote-cli group tree
+
+# Show all groups a reference belongs to (path format: GroupSet/Group)
+endnote-cli item groups 6
+endnote-cli item groups 6 --json   # machine-readable
 
 # Export a group as BibTeX
 endnote-cli export bibtex --group "RAG" -o rag_papers.bib
@@ -138,24 +137,9 @@ endnote-cli write journal-tags --refresh-data --refresh
 Ranking data is fetched from [hitfyd/ShowJCR](https://github.com/hitfyd/ShowJCR)
 on first use and cached under `~/.endnote-cli/jcr_cache/`.
 
-## MCP Server Setup
-
-Add to your `.mcp.json` (Claude Code) or `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "endnote": {
-      "command": "endnote-cli",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
 ## Install as a Claude Code Skill
 
-In addition to the MCP server, this repo ships a [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills) at `.claude/skills/endnote-cli/SKILL.md`. Once registered, Claude Code automatically loads it when you mention EndNote, `.enl`, BibTeX export, etc.
+This repo ships a [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills) at `.claude/skills/endnote-cli/SKILL.md`. Once registered, Claude Code automatically loads it when you mention EndNote, `.enl`, BibTeX export, etc.
 
 **Register the skill** (symlink keeps it in sync with repo updates):
 
@@ -190,7 +174,7 @@ At runtime, EndNote reads from `sdb.eni`. **All write operations must update bot
 
 ### Key Schema Details
 
-- **Groups/GroupSets** are stored as XML blobs in the `groups` table and `misc` table (`code=17`)
+- **Groups/GroupSets** -- group definitions live in the `groups` table (`spec` column, XML blob with name + UUID); GroupSet → child group hierarchy lives in `misc` table `code=17` (one row per GroupSet, XML blob whose `<member>` tags list child group UUIDs). The legacy `misc code=4` (space-separated `group_id set_id` pairs) only contains a stale subset and should not be relied on for hierarchy
 - **Tags** use two tables: `tag_groups` (XML blob with color hex) and `tag_members` (FTS5 virtual table with space-separated IDs)
 - **Multi-value fields** (keywords, authors) use `\r` (carriage return) as the separator
 - The `refs` table has triggers that call `EN_MAKE_SORT_KEY`, a custom SQLite function only available inside the EndNote application -- this means direct `INSERT` into `refs` is not safe
